@@ -1,41 +1,39 @@
 import java.io.*;
+import java.security.PublicKey;
 
 public class SSHAuthentication {
     private DataInputStream in;
     private DataOutputStream out;
+    private SSHTransport transport;
 
-    public SSHAuthentication(DataInputStream in, DataOutputStream out) {
+    public SSHAuthentication(DataInputStream in, DataOutputStream out, SSHTransport transport) {
         this.in = in;
         this.out = out;
+        this.transport = transport;
     }
 
-    // Client gửi username + password
-    public boolean handleAuthClient(String username, String password) throws IOException {
-        out.writeUTF(username);
-        out.writeUTF(password);
-        String response = in.readUTF();
-
-        if (response.equals("AUTH_SUCCESS")) {
-            System.out.println("[Auth] Authenticated as " + username);
-            return true;
-        } else {
-            System.out.println("[Auth] Login failed");
-            return false;
-        }
+    // Client xác thực user
+    public boolean handleAuthClient(String username, String password, PublicKey pubKey) throws Exception {
+        String creds = username + ":" + password;
+        String enc = transport.encryptMessage(creds, pubKey);
+        out.writeUTF(enc);
+        System.out.println("[Auth] Sent encrypted credentials.");
+        String resp = in.readUTF();
+        return resp.equals("OK");
     }
 
-    // Server xác thực
-    public boolean handleAuthServer(String validUser, String validPass) throws IOException {
-        String username = in.readUTF();
-        String password = in.readUTF();
-        System.out.println("[Auth] Attempt: " + username);
-
-        if (username.equals(validUser) && password.equals(validPass)) {
-            out.writeUTF("AUTH_SUCCESS");
-            System.out.println("[Auth] Client authenticated successfully!");
+    // Server xử lý xác thực
+    public boolean handleAuthServer() throws Exception {
+        String enc = in.readUTF();
+        String creds = transport.decryptMessage(enc);
+        System.out.println("[Auth] Received credentials: " + creds);
+        if (creds.equals("admin:12345")) {
+            out.writeUTF("OK");
+            System.out.println("[Auth] Authentication success.");
             return true;
         } else {
-            out.writeUTF("AUTH_FAIL");
+            out.writeUTF("FAIL");
+            System.out.println("[Auth] Authentication failed.");
             return false;
         }
     }

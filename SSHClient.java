@@ -1,30 +1,24 @@
 import java.io.*;
 import java.net.*;
-import java.util.Base64;
-
-import javax.crypto.SecretKey;
+import java.security.PublicKey;
 
 public class SSHClient {
     public static void main(String[] args) {
         try (Socket socket = new Socket("localhost", 8000)) {
+            System.out.println("[Client] Connected to server.");
+
             DataInputStream in = new DataInputStream(socket.getInputStream());
             DataOutputStream out = new DataOutputStream(socket.getOutputStream());
 
-            // --- Transport phase ---
             SSHTransport transport = new SSHTransport(in, out);
-            transport.exchangeVersion("SSH-2.0-DemoClient");
-            SecretKey aesKey = transport.performKeyExchange(false, null);
+            PublicKey serverPub = transport.receivePublicKey();
 
-            System.out.println("[Server] AES session key received: " + Base64.getEncoder().encodeToString(aesKey.getEncoded()));
-
-            // --- Authentication phase ---
-            SSHAuthentication auth = new SSHAuthentication(in, out);
-            if (auth.handleAuthClient("admin", "12345")) {
-                // --- Connection phase ---
-                SSHConnection conn = new SSHConnection(transport);
-                conn.handleSessionClient("show date");
+            SSHAuthentication auth = new SSHAuthentication(in, out, transport);
+            if (auth.handleAuthClient("admin", "12345", serverPub)) {
+                SSHConnection conn = new SSHConnection(in, out, transport);
+                conn.handleSessionClient("show date", serverPub);
             } else {
-                System.out.println("[Client] Authentication failed!");
+                System.out.println("[Client] Authentication failed.");
             }
 
             socket.close();

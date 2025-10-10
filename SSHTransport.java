@@ -1,82 +1,61 @@
 import java.io.*;
 import java.security.*;
-import javax.crypto.*;
-import javax.crypto.spec.SecretKeySpec;
 import java.util.Base64;
+import javax.crypto.Cipher;
 
 public class SSHTransport {
     private DataInputStream in;
     private DataOutputStream out;
-    private SecretKey aesKey;
+    private KeyPair serverKeyPair;
+    private PublicKey serverPublicKey;
 
     public SSHTransport(DataInputStream in, DataOutputStream out) {
         this.in = in;
         this.out = out;
     }
 
-    public SecretKey getAESKey() {
-        return this.aesKey;
-    }
-
-    public DataOutputStream getOut() {
-        return this.out;
-    }
-    public DataInputStream getInputStream() {
-    return in;
-    }
-
-    public DataOutputStream getOutputStream() {
-    return out;
-    }
-
-
-    // Trao đổi phiên bản
-    public void exchangeVersion(String version) throws IOException {
-        out.writeUTF(version);
-        String remoteVersion = in.readUTF();
-        System.out.println("[Transport] Connected to " + remoteVersion);
-    }
-
-    // Mô phỏng trao đổi khóa theo kiểu RSA + AES session key
-    public SecretKey performKeyExchange(boolean isServer, SecretKey existingKey) throws Exception {
+    // Server khởi tạo khoá RSA
+    public void setupServerKeys() throws Exception {
         KeyPairGenerator keyGen = KeyPairGenerator.getInstance("RSA");
         keyGen.initialize(2048);
-        KeyPair pair = keyGen.generateKeyPair();
+        serverKeyPair = keyGen.generateKeyPair();
+        serverPublicKey = serverKeyPair.getPublic();
+    }
 
-        if (isServer) {
-            // Server: gửi public key
-            out.writeUTF(Base64.getEncoder().encodeToString(pair.getPublic().getEncoded()));
+    // Gửi public key cho client
+    public void sendPublicKey() throws Exception {
+        String pubKeyStr = Base64.getEncoder().encodeToString(serverPublicKey.getEncoded());
+        out.writeUTF(pubKeyStr);
+        System.out.println("[Transport] Server sent public key to client.");
+    }
 
-            // Nhận AES key đã mã hóa
-            String encKeyStr = in.readUTF();
-            byte[] encKey = Base64.getDecoder().decode(encKeyStr);
+    // Client nhận public key
+    public PublicKey receivePublicKey() throws Exception {
+        String pubKeyStr = in.readUTF();
+        byte[] pubBytes = Base64.getDecoder().decode(pubKeyStr);
+        KeyFactory kf = KeyFactory.getInstance("RSA");
+        PublicKey pubKey = kf.generatePublic(new java.security.spec.X509EncodedKeySpec(pubBytes));
+        System.out.println("[Transport] Client received server public key.");
+        return pubKey;
+    }
 
-            Cipher rsaCipher = Cipher.getInstance("RSA");
-            rsaCipher.init(Cipher.DECRYPT_MODE, pair.getPrivate());
-            byte[] aesBytes = rsaCipher.doFinal(encKey);
+    // Server giải mã tin nhắn
+    public String decryptMessage(String encryptedBase64) throws Exception {
+        Cipher cipher = Cipher.getInstance("RSA");
+        cipher.init(Cipher.DECRYPT_MODE, serverKeyPair.getPrivate());
+        byte[] decoded = Base64.getDecoder().decode(encryptedBase64);
+        return new String(cipher.doFinal(decoded));
+    }
 
-            SecretKey aesKey = new SecretKeySpec(aesBytes, 0, aesBytes.length, "AES");
-            System.out.println("[Transport] Session key established.");
-            return aesKey;
-        } else {
-            // Client: nhận public key
-            String pubKeyStr = in.readUTF();
-            byte[] pubKeyBytes = Base64.getDecoder().decode(pubKeyStr);
-            KeyFactory kf = KeyFactory.getInstance("RSA");
-            PublicKey pubKey = kf.generatePublic(new java.security.spec.X509EncodedKeySpec(pubKeyBytes));
+    // Client mã hoá tin nhắn
+    public String encryptMessage(String msg, PublicKey pubKey) throws Exception {
+        Cipher cipher = Cipher.getInstance("RSA");
+        cipher.init(Cipher.ENCRYPT_MODE, pubKey);
+        byte[] enc = cipher.doFinal(msg.getBytes());
+        return Base64.getEncoder().encodeToString(enc);
+    }
 
-            // Sinh AES session key
-            KeyGenerator aesGen = KeyGenerator.getInstance("AES");
-            aesGen.init(128);
-            SecretKey aesKey = aesGen.generateKey();
-
-            Cipher rsaCipher = Cipher.getInstance("RSA");
-            rsaCipher.init(Cipher.ENCRYPT_MODE, pubKey);
-            byte[] encKey = rsaCipher.doFinal(aesKey.getEncoded());
-
-            out.writeUTF(Base64.getEncoder().encodeToString(encKey));
-            System.out.println("[Transport] Sent AES session key securely.");
-            return aesKey;
-        }
+    public PublicKey getServerPublicKey() {
+        return serverPublicKey;
     }
 }

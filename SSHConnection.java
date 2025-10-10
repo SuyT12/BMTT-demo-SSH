@@ -1,41 +1,36 @@
 import java.io.*;
+import java.security.PublicKey;
 
 public class SSHConnection {
+    private DataInputStream in;
+    private DataOutputStream out;
     private SSHTransport transport;
 
-    public SSHConnection(SSHTransport transport) {
+    public SSHConnection(DataInputStream in, DataOutputStream out, SSHTransport transport) {
+        this.in = in;
+        this.out = out;
         this.transport = transport;
     }
 
     // Client gửi lệnh
-    public void handleSessionClient(String command) throws Exception {
-        DataOutputStream out = transport.getOutputStream();
-        DataInputStream in = transport.getInputStream();
-
-        out.writeUTF(command);
-        out.flush();
-        String result = in.readUTF();
-        System.out.println("[Client] Server replied: " + result);
+    public void handleSessionClient(String command, PublicKey pubKey) throws Exception {
+        String enc = transport.encryptMessage(command, pubKey);
+        out.writeUTF(enc);
+        String encReply = in.readUTF();
+        String reply = transport.decryptMessage(encReply);
+        System.out.println("[Client] Server replied: " + reply);
     }
 
-    // Server thực thi lệnh
+    // Server thực thi
     public void handleSessionServer() throws Exception {
-        DataInputStream in = transport.getInputStream();
-        DataOutputStream out = transport.getOutputStream();
-
-        String cmd = in.readUTF();
+        String encCmd = in.readUTF();
+        String cmd = transport.decryptMessage(encCmd);
         System.out.println("[Server] Received command: " + cmd);
 
-        String result;
-        if (cmd.equalsIgnoreCase("show date")) {
-            result = new java.util.Date().toString();
-        } else if (cmd.equalsIgnoreCase("hello")) {
-            result = "Hello from SSH Demo Server!";
-        } else {
-            result = "Unknown command.";
-        }
+        String result = cmd.equalsIgnoreCase("show date") ?
+                new java.util.Date().toString() : "Unknown command.";
 
-        out.writeUTF(result);
-        out.flush();
+        String encReply = transport.encryptMessage(result, transport.getServerPublicKey());
+        out.writeUTF(encReply);
     }
 }
